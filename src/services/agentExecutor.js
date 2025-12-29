@@ -249,7 +249,7 @@ async function callGeminiAPI(model, conversationHistory, geminiParams, tools, ap
       temperature: geminiParams.temperature || 0.7,
       topK: geminiParams.topK || 40,
       topP: geminiParams.topP || 0.95,
-      maxOutputTokens: geminiParams.maxOutputTokens || 8000,
+      maxOutputTokens: geminiParams.maxOutputTokens || 20000,
     }
   };
   
