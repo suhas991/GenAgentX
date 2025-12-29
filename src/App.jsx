@@ -14,10 +14,14 @@ import {
   getAllAgents,
   deleteAgent,
   getWorkflowsUsingAgent,
+  getAllTools,
+  saveTool,
+  deleteTool,
 } from './services/indexedDB';
 import { executeAgent } from './services/llmService';
 import { exportAgents } from './services/exportImportService';
 import { DEFAULT_AGENTS } from './constants/defaultAgents';
+import { DEFAULT_TOOLS } from './constants/defaultTools';
 import './App.css';
 import ExecutionHistory from './components/ExecutionHistory';
 
@@ -108,7 +112,10 @@ function App() {
   const initializeApp = async () => {
     try {
       await initDB();
+      await removeDeprecatedDefaultTools();
       await seedDefaultAgents();
+      await seedDefaultTools();
+      await pruneDuplicateDefaultTools();
       await loadAgents();
     } catch (error) {
       console.error('App initialization error:', error);
@@ -137,6 +144,71 @@ function App() {
         await saveAgent(defaultAgent);
       }
       console.log('✅ Default agent created!');
+    }
+  };
+
+  const seedDefaultTools = async () => {
+    const existingTools = await getAllTools();
+    const existingNames = new Set(existingTools.map((t) => t.name));
+
+    // Seed any missing built-in tools without duplicating user tools
+    const missingDefaults = DEFAULT_TOOLS.filter((tool) => !existingNames.has(tool.name));
+
+    if (missingDefaults.length > 0) {
+      console.log(`🆕 Seeding ${missingDefaults.length} default tool(s)...`);
+      for (const defaultTool of missingDefaults) {
+        await saveTool({ ...defaultTool, isDefault: true });
+      }
+      console.log('✅ Default tools created!');
+    } else {
+      console.log('ℹ️ All default tools already present');
+    }
+  };
+
+  const pruneDuplicateDefaultTools = async () => {
+    const tools = await getAllTools();
+    const toDelete = [];
+
+    const grouped = tools.reduce((acc, tool) => {
+      if (!acc[tool.name]) acc[tool.name] = [];
+      acc[tool.name].push(tool);
+      return acc;
+    }, {});
+
+    Object.values(grouped).forEach((list) => {
+      const defaults = list.filter((t) => t.isDefault);
+      if (defaults.length > 1) {
+        // Keep the newest default (based on createdAt or updatedAt) and remove the rest
+        const sorted = [...defaults].sort((a, b) => {
+          const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+          const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          return bTime - aTime;
+        });
+        const [, ...extras] = sorted;
+        toDelete.push(...extras.map((t) => t.id));
+      }
+    });
+
+    for (const id of toDelete) {
+      await deleteTool(id);
+    }
+
+    if (toDelete.length) {
+      console.log(`🧹 Pruned ${toDelete.length} duplicate default tool(s)`);
+    }
+  };
+
+  const removeDeprecatedDefaultTools = async () => {
+    const deprecatedNames = new Set(['web_search', 'file_reader', 'code_executor', 'image_analyzer']);
+    const tools = await getAllTools();
+    const toDelete = tools.filter((t) => t.isDefault && deprecatedNames.has(t.name)).map((t) => t.id);
+
+    for (const id of toDelete) {
+      await deleteTool(id);
+    }
+
+    if (toDelete.length) {
+      console.log(`🗑️ Removed ${toDelete.length} deprecated default tool(s)`);
     }
   };
 
@@ -254,13 +326,14 @@ function App() {
     await loadAgents();
   };
 
-  const handleExportAll = () => {
+  const handleExportAll = async () => {
     const exportableAgents = agents.filter(agent => !agent.isDefault);
     if (exportableAgents.length === 0) {
       showWarning('No custom agents available to export.', 'No Agents to Export');
       return;
     }
-    exportAgents(exportableAgents);
+    const tools = await getAllTools();
+    exportAgents(exportableAgents, tools);
   };
 
   // Show mobile blocker on small screens

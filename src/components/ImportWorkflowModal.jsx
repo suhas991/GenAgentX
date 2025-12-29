@@ -1,10 +1,10 @@
-// src/components/ImportAgentsModal.jsx
+// src/components/ImportWorkflowModal.jsx
 import React, { useState, useRef } from 'react';
-import { importAgentsFromFile, generateUniqueName } from '../services/exportImportService';
-import { saveTool } from '../services/indexedDB';
-import './ImportAgentsModal.css';
+import { importWorkflowFromFile, generateUniqueName } from '../services/exportImportService';
+import { saveTool, getAllAgents } from '../services/indexedDB';
+import './ImportAgentsModal.css'; // Reuse same styling
 
-const ImportAgentsModal = ({ onClose, onImport, existingAgents }) => {
+const ImportWorkflowModal = ({ onClose, onImport }) => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [importing, setImporting] = useState(false);
   const [previewData, setPreviewData] = useState(null);
@@ -12,16 +12,16 @@ const ImportAgentsModal = ({ onClose, onImport, existingAgents }) => {
   const fileInputRef = useRef(null);
 
   const handleFileSelect = async (event) => {
-    const file = event.target.files[0];
+    const file = event.target.files?.[0];
     if (!file) return;
 
     setError('');
     setSelectedFile(file);
 
     try {
-      const importData = await importAgentsFromFile(file);
-      const { agents, tools } = importData;
-      setPreviewData({ agents, tools });
+      const importData = await importWorkflowFromFile(file);
+      const { workflow, agents, tools } = importData;
+      setPreviewData({ workflow, agents: agents || [], tools: tools || [] });
     } catch (err) {
       setError(err.message);
       setSelectedFile(null);
@@ -34,8 +34,13 @@ const ImportAgentsModal = ({ onClose, onImport, existingAgents }) => {
 
     setImporting(true);
     try {
+      // Get existing agents to check for duplicates
+      const existingAgents = await getAllAgents();
+      const existingAgentNames = existingAgents.map(a => a.name);
+
       // Import tools first and track ID mapping (old ID -> new ID)
       const toolIdMap = {};
+      const toolNameToIdMap = {}; // For backward compatibility with old exports
       if (previewData.tools && previewData.tools.length > 0) {
         for (const tool of previewData.tools) {
           // Use originalId if available (from new exports), fall back to id for backwards compatibility
@@ -43,42 +48,68 @@ const ImportAgentsModal = ({ onClose, onImport, existingAgents }) => {
           // Remove id and originalId fields so new one is generated
           const { id, originalId, ...toolWithoutId } = tool;
           const savedTool = await saveTool(toolWithoutId);
-          console.log('Tool mapping:', oldToolId, '->', savedTool.id);
+          console.log('Workflow - Tool mapping:', oldToolId, '->', savedTool.id);
           if (oldToolId) {
             toolIdMap[oldToolId] = savedTool.id;
+          }
+          // Also track by name for old exports that don't have originalId
+          if (tool.name) {
+            toolNameToIdMap[tool.name] = savedTool.id;
           }
         }
       }
 
-      // Import agents
-      const existingNames = existingAgents.map(a => a.name);
-      const agentsToImport = previewData.agents.map(agent => {
+      // Import agents and track ID mapping
+      const agentIdMap = {};
+      const agentsToImport = [];
+      
+      // Ensure previewData.agents is an array
+      const agentsToProcess = Array.isArray(previewData.agents) ? previewData.agents : [];
+      
+      for (const agent of agentsToProcess) {
+        // Use originalId if available (from new exports), fall back to id for backwards compatibility
+        const oldId = agent.originalId || agent.id;
+        
         // Remove id and originalId fields so new one is generated
         const { id, originalId, ...agentWithoutId } = agent;
-        let agentData = {
-          ...agentWithoutId,
-          name: generateUniqueName(agent.name, existingNames),
-          customParameters: agent.customParameters || []
-        };
+        let agentToSave = { ...agentWithoutId };
         
-        console.log('Agent tools before mapping:', agentData.tools);
-        console.log('Tool ID map:', toolIdMap);
+        console.log('Workflow - Agent tools before mapping:', agentToSave.tools);
         
         // Update agent's tool references with new tool IDs
-        if (agentData.tools && Array.isArray(agentData.tools)) {
-          agentData.tools = agentData.tools.map(toolId => {
+        if (agentToSave.tools && Array.isArray(agentToSave.tools)) {
+          agentToSave.tools = agentToSave.tools.map(toolId => {
             const newId = toolIdMap[toolId] || toolId;
-            console.log('Mapping tool ID:', toolId, '->', newId);
+            console.log('Workflow - Mapping tool ID:', toolId, '->', newId);
             return newId;
           });
         }
         
-        console.log('Agent tools after mapping:', agentData.tools);
+        console.log('Workflow - Agent tools after mapping:', agentToSave.tools);
         
-        return agentData;
+        if (existingAgentNames.includes(agent.name)) {
+          const uniqueName = generateUniqueName(agent.name, existingAgentNames);
+          agentToSave.name = uniqueName;
+          existingAgentNames.push(uniqueName);
+        } else {
+          existingAgentNames.push(agent.name);
+        }
+        
+        // Attach originalId temporarily so Dashboard can track the mapping
+        agentToSave._originalId = oldId;
+        agentsToImport.push(agentToSave);
+        if (oldId !== undefined && oldId !== null) {
+          agentIdMap[oldId] = null; // Will be set after import in Dashboard
+        }
+      }
+
+      // Call parent handler with all data
+      await onImport({
+        workflow: previewData.workflow,
+        agents: agentsToImport,
+        agentIdMap
       });
 
-      await onImport(agentsToImport);
       onClose();
     } catch (err) {
       setError('Failed to import: ' + err.message);
@@ -92,8 +123,8 @@ const ImportAgentsModal = ({ onClose, onImport, existingAgents }) => {
       <div className="modal-content modern import-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <h2>Import Agents</h2>
-            <p className="modal-subtitle">Upload a JSON file to import agents</p>
+            <h2>Import Workflow</h2>
+            <p className="modal-subtitle">Upload a JSON file to import workflow with agents and tools</p>
           </div>
           <button onClick={onClose} className="close-btn">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -139,6 +170,19 @@ const ImportAgentsModal = ({ onClose, onImport, existingAgents }) => {
           {previewData && (
             <div className="preview-section">
               <h3>Preview</h3>
+              
+              {/* Workflow Info */}
+              <div className="preview-workflow" style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f0f4ff', borderRadius: '8px', borderLeft: '4px solid #4f46e5' }}>
+                <strong style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📋</span>
+                  Workflow: {previewData.workflow.name}
+                </strong>
+                <span style={{ fontSize: '12px', color: '#666' }}>
+                  {previewData.agents.length} agent(s) in workflow
+                </span>
+              </div>
+
+              {/* Tools */}
               {previewData.tools && previewData.tools.length > 0 && (
                 <div className="preview-tools">
                   <strong>Tools ({previewData.tools.length}):</strong>
@@ -155,6 +199,8 @@ const ImportAgentsModal = ({ onClose, onImport, existingAgents }) => {
                   </div>
                 </div>
               )}
+
+              {/* Agents */}
               <div className="preview-agents">
                 <strong>Agents ({previewData.agents.length}):</strong>
                 <div className="preview-list">
@@ -194,7 +240,7 @@ const ImportAgentsModal = ({ onClose, onImport, existingAgents }) => {
                   <polyline points="17 8 12 3 7 8"></polyline>
                   <line x1="12" y1="3" x2="12" y2="15"></line>
                 </svg>
-                Import Agents
+                Import Workflow
               </>
             )}
           </button>
@@ -204,4 +250,4 @@ const ImportAgentsModal = ({ onClose, onImport, existingAgents }) => {
   );
 };
 
-export default ImportAgentsModal;
+export default ImportWorkflowModal;

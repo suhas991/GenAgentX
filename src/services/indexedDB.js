@@ -3,7 +3,8 @@ const STORE_NAME = "agents";
 const EXECUTIONS_STORE = "executions";
 const WORKFLOWS_STORE = "workflows";
 const WORKFLOW_EXECUTIONS_STORE = "workflow_executions";
-const DB_VERSION = 4; // Bump version!
+const TOOLS_STORE = "tools";
+const DB_VERSION = 5; // Bump version!
 
 export const getDB = async () => await initDB();
 
@@ -48,6 +49,14 @@ export const initDB = () => {
         workflowExecutionStore.createIndex("workflowId", "workflowId", { unique: false });
         workflowExecutionStore.createIndex("runAt", "runAt", { unique: false });
       }
+      
+      if (!db.objectStoreNames.contains(TOOLS_STORE)) {
+        const toolStore = db.createObjectStore(TOOLS_STORE, {
+          keyPath: "id",
+        });
+        toolStore.createIndex("name", "name", { unique: false });
+        toolStore.createIndex("createdAt", "createdAt", { unique: false });
+      }
     };
   });
 };
@@ -60,9 +69,13 @@ export const saveAgent = async (agent) => {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], "readwrite");
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.add({ ...agent, createdAt: new Date() });
+    const agentData = { ...agent, createdAt: new Date() };
+    const request = store.add(agentData);
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      // Return the complete agent object with the new ID
+      resolve({ ...agentData, id: request.result });
+    };
     request.onerror = () => reject(request.error);
   });
 };
@@ -215,4 +228,76 @@ export async function getAllWorkflowExecutionLogs() {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+// ---------- TOOLS CRUD ----------
+
+export async function saveTool(tool) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([TOOLS_STORE], 'readwrite');
+    const store = tx.objectStore(TOOLS_STORE);
+    
+    let toolData;
+    let request;
+    if (tool.id) {
+      // Update existing tool
+      toolData = { 
+        ...tool, 
+        updatedAt: new Date().toISOString() 
+      };
+      request = store.put(toolData);
+    } else {
+      // Create new tool
+      const id = crypto.randomUUID();
+      toolData = { 
+        ...tool,
+        id, 
+        createdAt: new Date().toISOString() 
+      };
+      request = store.add(toolData);
+    }
+    
+    request.onsuccess = () => resolve(toolData);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getAllTools() {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([TOOLS_STORE], 'readonly');
+    const store = tx.objectStore(TOOLS_STORE);
+    const request = store.getAll();
+    
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getToolById(id) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([TOOLS_STORE], 'readonly');
+    const store = tx.objectStore(TOOLS_STORE);
+    const request = store.get(id);
+    
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteTool(id) {
+  const db = await getDB();
+  const tx = db.transaction([TOOLS_STORE], 'readwrite');
+  await tx.objectStore(TOOLS_STORE).delete(id);
+  return tx.done;
+}
+
+// Check if tool is used by any agents
+export async function getAgentsUsingTool(toolId) {
+  const agents = await getAllAgents();
+  return agents.filter(agent => 
+    agent.tools && agent.tools.includes(toolId)
+  );
 }

@@ -6,13 +6,15 @@ import RunAgentModal from "../components/RunAgentModal";
 import ChatBot from "../components/ChatBot";
 import SettingsModal from "../components/SettingsModal";
 import ImportAgentsModal from "../components/ImportAgentsModal";
+import ImportWorkflowModal from "../components/ImportWorkflowModal";
 import ExecutionHistory from "../components/ExecutionHistory";
 import WorkflowsView from "../components/WorkflowsView";
 import WorkflowBuilder from "../components/WorkflowBuilder";
 import WorkflowRunner from "../components/WorkflowRunner";
+import ToolsView from "../components/ToolsView";
+import ToolBuilder from "../components/ToolBuilder";
 import { useAppStore } from "../store/appStore";
-import { saveWorkflow } from "../services/indexedDB";
-import { importWorkflowFromFile, generateUniqueName } from "../services/exportImportService";
+import { saveWorkflow, saveTool, saveAgent, getAllAgents } from "../services/indexedDB";
 import { FaUserCircle } from "react-icons/fa";
 import "../App.css";
 
@@ -28,6 +30,7 @@ const Dashboard = ({
 }) => {
   const {
     agents,
+    setAgents,
     userConfig,
     showFormModal,
     setShowFormModal,
@@ -48,9 +51,15 @@ const Dashboard = ({
   const [activeView, setActiveView] = useState('agents');
   const [showWorkflowBuilder, setShowWorkflowBuilder] = useState(false);
   const [showWorkflowRunner, setShowWorkflowRunner] = useState(false);
+  const [showImportWorkflowModal, setShowImportWorkflowModal] = useState(false);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
   const [editingWorkflow, setEditingWorkflow] = useState(null);
   const [workflowsKey, setWorkflowsKey] = useState(0); // Force re-render
+  
+  // Tools state
+  const [showToolBuilder, setShowToolBuilder] = useState(false);
+  const [editingTool, setEditingTool] = useState(null);
+  const [toolsKey, setToolsKey] = useState(0); // Force re-render
   
   // Search and sort states
   const [agentSearchQuery, setAgentSearchQuery] = useState('');
@@ -88,24 +97,78 @@ const Dashboard = ({
     setShowWorkflowRunner(true);
   };
 
-  const handleImportWorkflow = async (file) => {
+  const handleImportWorkflow = async (importData) => {
     try {
-      const workflowData = await importWorkflowFromFile(file);
+      const { workflow: workflowData, agents: agentsToImport = [], agentIdMap = {} } = importData;
       
-      // Generate unique name if workflow name already exists
-      // Note: In a real scenario, you'd fetch existing workflows to check names
+      // Ensure agentsToImport is an array
+      const agentsArray = Array.isArray(agentsToImport) ? agentsToImport : [];
       
-      // Save the imported workflow
-      await saveWorkflow(workflowData);
+      // Import agents and update ID map
+      for (const agent of agentsArray) {
+        // Use _originalId attached by ImportWorkflowModal for mapping
+        const oldId = agent._originalId;
+        // Remove the temporary _originalId before saving
+        const { _originalId, ...agentToSave } = agent;
+        const savedAgent = await saveAgent(agentToSave);
+        if (oldId !== undefined && oldId !== null) {
+          agentIdMap[oldId] = savedAgent.id;
+        }
+      }
       
-      // Refresh workflows
+      // Update workflow to use new agent IDs
+      const updatedWorkflow = {
+        ...workflowData,
+        agents: workflowData.agents.map(wa => ({
+          ...wa,
+          agentId: agentIdMap[wa.agentId] !== undefined ? agentIdMap[wa.agentId] : wa.agentId
+        }))
+      };
+      
+      // Save the workflow with corrected agent references
+      await saveWorkflow(updatedWorkflow);
+      
+      // Refresh workflows, agents, and tools
       setWorkflowsKey(prev => prev + 1);
+      setToolsKey(prev => prev + 1); // Refresh tools list
+      const refreshedAgents = await getAllAgents();
+      setAgents(refreshedAgents); // Refresh agents list in store
       
       alert(`Workflow "${workflowData.name}" imported successfully!`);
     } catch (error) {
       console.error('Failed to import workflow:', error);
       alert('Failed to import workflow: ' + error.message);
     }
+  };
+
+  // Tool handlers
+  const handleBuildTool = () => {
+    setEditingTool(null);
+    setShowToolBuilder(true);
+  };
+
+  const handleEditTool = (tool) => {
+    setEditingTool(tool);
+    setShowToolBuilder(true);
+  };
+
+  const handleSaveTool = () => {
+    setToolsKey(prev => prev + 1); // Refresh tools
+  };
+
+  const handleImportTool = async (tool) => {
+    try {
+      await saveTool(tool);
+      setToolsKey(prev => prev + 1); // Refresh tools
+    } catch (error) {
+      console.error('Failed to import tool:', error);
+      alert('Failed to import tool: ' + error.message);
+    }
+  };
+
+  const handleTestTool = (tool) => {
+    // For now, just show an alert. You can implement a test modal later
+    alert(`Testing tool: ${tool.name}\n\nThis feature will allow you to test the tool with sample inputs.`);
   };
 
   const helperAgent = agents.find((agent) => agent.isDefault);
@@ -163,7 +226,8 @@ const Dashboard = ({
           <div className="header-left">
             <h1>
               {activeView === 'agents' ? 'AI Agents' : 
-               activeView === 'workflows' ? 'Workflows' : 
+               activeView === 'workflows' ? 'Workflows' :
+               activeView === 'tools' ? 'Tools' :
                'Execution History'}
             </h1>
           </div>
@@ -217,7 +281,7 @@ const Dashboard = ({
                     <>
                       <div className="user-menu-divider"></div>
 
-                      <button className="user-menu-item" onClick={() => { setShowUserMenu(false); document.getElementById('workflow-import-input').click(); }}>
+                      <button className="user-menu-item" onClick={() => { setShowUserMenu(false); setShowImportWorkflowModal(true); }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                           <polyline points="17 8 12 3 7 8"></polyline>
@@ -254,19 +318,6 @@ const Dashboard = ({
 
             {activeView === 'workflows' && (
               <>
-                <input
-                  id="workflow-import-input"
-                  type="file"
-                  accept=".json"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      handleImportWorkflow(file);
-                      e.target.value = '';
-                    }
-                  }}
-                />
                 <button onClick={() => { setEditingWorkflow(null); setShowWorkflowBuilder(true); }} className="btn-primary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -275,6 +326,16 @@ const Dashboard = ({
                   Build Workflow
                 </button>
               </>
+            )}
+
+            {activeView === 'tools' && (
+              <button onClick={handleBuildTool} className="btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Create Tool
+              </button>
             )}
           </div>
         </header>
@@ -386,6 +447,15 @@ const Dashboard = ({
           />
         )}
 
+        {activeView === 'tools' && (
+          <ToolsView
+            key={toolsKey}
+            onBuildTool={handleBuildTool}
+            onEditTool={handleEditTool}
+            onTestTool={handleTestTool}
+          />
+        )}
+
         {activeView === 'history' && <ExecutionHistory />}
 
         {/* MODALS */}
@@ -416,17 +486,31 @@ const Dashboard = ({
           />
         )}
 
+        {showToolBuilder && (
+          <ToolBuilder
+            editingTool={editingTool}
+            onSave={handleSaveTool}
+            onClose={() => {
+              setShowToolBuilder(false);
+              setEditingTool(null);
+            }}
+          />
+        )}
+
         <ChatBot
           isOpen={isChatBotOpen}
           onToggle={() => setIsChatBotOpen(!isChatBotOpen)}
           onSendMessage={onChatBotMessage}
           agentName={"GenAgentX Assistant"}
           onImportAgent={(agent) => onImportAgents([agent])}
+          onImportTool={handleImportTool}
         />
 
         {showSettings && <SettingsModal onClose={() => setShowSettings(false)} currentConfig={userConfig} onSave={() => {}} />}
 
         {showImportModal && <ImportAgentsModal onClose={() => setShowImportModal(false)} onImport={onImportAgents} existingAgents={agents} />}
+        
+        {showImportWorkflowModal && <ImportWorkflowModal onClose={() => setShowImportWorkflowModal(false)} onImport={handleImportWorkflow} />}
       </div>
     </div>
   );

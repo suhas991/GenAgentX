@@ -1,7 +1,8 @@
 // src/components/AgentForm.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import CustomParametersField from './CustomParametersField';
 import RAGManager from './RAGManager';
+import { getAllTools } from '../services/indexedDB';
 import { GEMINI_MODELS, DEFAULT_MODEL } from '../constants/models';
 
 const AgentForm = ({ onSave, initialData = null, onCancel }) => {
@@ -15,10 +16,25 @@ const AgentForm = ({ onSave, initialData = null, onCancel }) => {
     customParameters: initialData?.customParameters || [],
     ragEnabled: initialData?.ragEnabled || false,
     ragTopK: initialData?.ragTopK || 3,
+    tools: initialData?.tools || [],
     id: initialData?.id || null
   });
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [availableTools, setAvailableTools] = useState([]);
+
+  useEffect(() => {
+    loadTools();
+  }, []);
+
+  const loadTools = async () => {
+    try {
+      const tools = await getAllTools();
+      setAvailableTools(tools || []);
+    } catch (err) {
+      console.error('Failed to load tools:', err);
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -40,6 +56,15 @@ const AgentForm = ({ onSave, initialData = null, onCancel }) => {
       ...prev,
       ragEnabled: updatedAgent.ragEnabled,
       ragTopK: updatedAgent.ragTopK
+    }));
+  };
+
+  const handleToolToggle = (toolId) => {
+    setFormData(prev => ({
+      ...prev,
+      tools: prev.tools.includes(toolId)
+        ? prev.tools.filter(id => id !== toolId)
+        : [...prev.tools, toolId]
     }));
   };
 
@@ -149,6 +174,32 @@ const AgentForm = ({ onSave, initialData = null, onCancel }) => {
           disabled={isSaving}
         />
       </div>
+
+      {/* Tools Selection */}
+      {availableTools.length > 0 && (
+        <div className="form-group">
+          <label>Tools (Optional)</label>
+          <p className="form-help-text">
+            Select tools that this agent can use to perform tasks
+          </p>
+          <div className="tools-selection">
+            {availableTools.map(tool => (
+              <label key={tool.id} className="tool-checkbox">
+                <input
+                  type="checkbox"
+                  checked={formData.tools.includes(tool.id)}
+                  onChange={() => handleToolToggle(tool.id)}
+                  disabled={isSaving}
+                />
+                <span className="tool-name">{tool.name}</span>
+                {tool.description && (
+                  <span className="tool-description">{tool.description}</span>
+                )}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* RAG Manager - Only show for existing agents with an ID */}
       {formData.id && (

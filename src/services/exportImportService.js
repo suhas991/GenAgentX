@@ -1,14 +1,27 @@
 // src/services/exportImportService.js
 
 /**
- * Export a single agent to JSON file
+ * Export a single agent with its custom tools to JSON file
  */
-export const exportAgent = (agent) => {
+export const exportAgent = async (agent, tools = []) => {
+  // Ensure agent has a tools array
+  const agentWithTools = {
+    ...agent,
+    tools: agent.tools || []
+  };
+  
+  // Get tools used by this agent (custom tools only)
+  const agentTools = agentWithTools.tools.length > 0 
+    ? tools.filter(t => agentWithTools.tools.includes(t.id) && !t.isDefault) 
+    : [];
+  
   const exportData = {
     version: '1.0',
     exportDate: new Date().toISOString(),
     agentCount: 1,
-    agents: [sanitizeAgent(agent)]
+    toolCount: agentTools.length,
+    agents: [sanitizeAgent(agentWithTools)],
+    tools: agentTools.map(sanitizeTool)
   };
 
   const blob = new Blob([JSON.stringify(exportData, null, 2)], { 
@@ -25,14 +38,33 @@ export const exportAgent = (agent) => {
 };
 
 /**
- * Export multiple agents to JSON file
+ * Export multiple agents with their custom tools to JSON file
  */
-export const exportAgents = (agents) => {
+export const exportAgents = (agents, tools = []) => {
+  // Collect all custom tools used by any agent
+  const toolIds = new Set();
+  agents.forEach(agent => {
+    const agentTools = agent.tools || [];
+    if (Array.isArray(agentTools)) {
+      agentTools.forEach(toolId => toolIds.add(toolId));
+    }
+  });
+  
+  const agentTools = tools.filter(t => toolIds.has(t.id) && !t.isDefault);
+  
+  // Ensure all agents have tools array
+  const agentsWithTools = agents.map(agent => ({
+    ...agent,
+    tools: agent.tools || []
+  }));
+  
   const exportData = {
     version: '1.0',
     exportDate: new Date().toISOString(),
     agentCount: agents.length,
-    agents: agents.map(sanitizeAgent)
+    toolCount: agentTools.length,
+    agents: agentsWithTools.map(sanitizeAgent),
+    tools: agentTools.map(sanitizeTool)
   };
 
   const blob = new Blob([JSON.stringify(exportData, null, 2)], { 
@@ -50,11 +82,26 @@ export const exportAgents = (agents) => {
 
 /**
  * Remove internal fields before export
+ * Note: We preserve the original ID for relationship mapping during import
  */
 const sanitizeAgent = (agent) => {
-  const { id, isDefault, ...cleanAgent } = agent;
+  const { isDefault, ...cleanAgent } = agent;
   return {
     ...cleanAgent,
+    originalId: agent.id, // Preserve for mapping during import
+    exportedAt: new Date().toISOString()
+  };
+};
+
+/**
+ * Remove internal fields before tool export
+ * Note: We preserve the original ID for relationship mapping during import
+ */
+const sanitizeTool = (tool) => {
+  const { createdAt, updatedAt, isDefault, implementation, ...cleanTool } = tool;
+  return {
+    ...cleanTool,
+    originalId: tool.id, // Preserve for mapping during import
     exportedAt: new Date().toISOString()
   };
 };
@@ -85,14 +132,15 @@ export const validateImportData = (data) => {
       }
     }
 
-    return { valid: true, data };
+    // Return both agents and tools (if present)
+    return { valid: true, agents: data.agents, tools: data.tools || [] };
   } catch (error) {
     return { valid: false, error: error.message };
   }
 };
 
 /**
- * Parse and import agents from file
+ * Parse and import agents from file (including tools)
  */
 export const importAgentsFromFile = (file) => {
   return new Promise((resolve, reject) => {
@@ -108,7 +156,8 @@ export const importAgentsFromFile = (file) => {
           return;
         }
 
-        resolve(jsonData.agents);
+        // Return both agents and tools
+        resolve({ agents: validation.agents, tools: validation.tools });
       } catch (error) {
         reject(new Error('Failed to parse JSON file'));
       }
@@ -138,14 +187,40 @@ export const generateUniqueName = (baseName, existingNames) => {
 };
 
 /**
- * Export a single workflow to JSON file
+ * Export a workflow with its agents and tools to JSON file
  */
-export const exportWorkflow = (workflow) => {
+export const exportWorkflow = async (workflow, agents = [], tools = []) => {
+  // Get agents used by this workflow
+  const workflowAgents = workflow.agents 
+    ? agents.filter(a => workflow.agents.some(wa => wa.agentId === a.id))
+    : [];
+  
+  // Get all custom tools used by those agents
+  const toolIds = new Set();
+  workflowAgents.forEach(agent => {
+    const agentTools = agent.tools || [];
+    if (Array.isArray(agentTools)) {
+      agentTools.forEach(toolId => toolIds.add(toolId));
+    }
+  });
+  
+  const workflowTools = tools.filter(t => toolIds.has(t.id) && !t.isDefault);
+  
+  // Ensure all agents have tools array
+  const agentsWithTools = workflowAgents.map(agent => ({
+    ...agent,
+    tools: agent.tools || []
+  }));
+  
   const exportData = {
     version: '1.0',
     exportDate: new Date().toISOString(),
     type: 'workflow',
-    workflow: sanitizeWorkflow(workflow)
+    workflow: sanitizeWorkflow(workflow),
+    agentCount: workflowAgents.length,
+    toolCount: workflowTools.length,
+    agents: agentsWithTools.map(sanitizeAgent),
+    tools: workflowTools.map(sanitizeTool)
   };
 
   const blob = new Blob([JSON.stringify(exportData, null, 2)], { 
@@ -173,7 +248,7 @@ const sanitizeWorkflow = (workflow) => {
 };
 
 /**
- * Validate imported workflow JSON structure
+ * Validate imported workflow JSON structure (with agents and tools)
  */
 export const validateWorkflowImportData = (data) => {
   try {
@@ -202,14 +277,14 @@ export const validateWorkflowImportData = (data) => {
       return { valid: false, error: 'Workflow missing required fields (name, agents array)' };
     }
 
-    return { valid: true, data: workflow };
+    return { valid: true, workflow, agents: data.agents || [], tools: data.tools || [] };
   } catch (error) {
     return { valid: false, error: error.message };
   }
 };
 
 /**
- * Parse and import workflow from file
+ * Parse and import workflow from file (including agents and tools)
  */
 export const importWorkflowFromFile = (file) => {
   return new Promise((resolve, reject) => {
@@ -225,7 +300,8 @@ export const importWorkflowFromFile = (file) => {
           return;
         }
 
-        resolve(validation.data);
+        // Return workflow, agents, and tools
+        resolve({ workflow: validation.workflow, agents: validation.agents, tools: validation.tools });
       } catch (error) {
         reject(new Error('Failed to parse JSON file'));
       }

@@ -12,18 +12,20 @@ const ChatBot = ({
   onSendMessage,
   agentName,
   onImportAgent,
+  onImportTool,
 }) => {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
       content: `Hi! 👋 I'm the **GenAgentX Assistant**.
 
-I can help you create well-structured AI agents. Just describe what you want!
+I can help you create AI agents and custom tools. Just describe what you want!
 
 *Examples:*
-- "I need an agent that writes marketing emails"
-- "Create an agent for data analysis"
-- "Help me build a customer support agent"`,
+- "Create an agent that writes marketing emails"
+- "Build a tool to generate random UUIDs"
+- "I need a customer support agent"
+- "Make a slug generator tool"`,
     },
   ]);
   const [input, setInput] = useState("");
@@ -38,9 +40,7 @@ I can help you create well-structured AI agents. Just describe what you want!
     scrollToBottom();
   }, [messages]);
 
-  // Detect if message contains valid JSON agent config
-  // In ChatBot.jsx, replace the detectAgentJSON function:
-
+  // Detect if message contains valid JSON agent or tool config
   const detectAgentJSON = (content) => {
     content = content || "";
     console.log("🔍 Checking for JSON in content preview:", content.slice(0, 200));
@@ -61,31 +61,44 @@ I can help you create well-structured AI agents. Just describe what you want!
         Object.prototype.hasOwnProperty.call(obj, k)
       );
 
+    const isToolObject = (obj) =>
+      obj &&
+      typeof obj === "object" &&
+      !Array.isArray(obj) &&
+      ["name", "description", "parameters", "returnType"].every((k) =>
+        Object.prototype.hasOwnProperty.call(obj, k)
+      );
+
     const normalizeParsed = (parsed) => {
-      // If it's export format { version, agents: [...] }
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        Array.isArray(parsed.agents) &&
-        parsed.agents.length > 0
-      ) {
-        if (isAgentObject(parsed.agents[0])) {
-          console.log("✅ Valid GenAgentX export detected");
-          // Show success message
-          return { valid: true, data: parsed };
-        } else {
-          console.log("❌ Agents array present but missing required agent fields");
-          return { valid: false };
+      // If it's export format { version, agents: [...], tools: [...] }
+      if (parsed && typeof parsed === "object") {
+        const hasAgents = Array.isArray(parsed.agents) && parsed.agents.length > 0;
+        const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0;
+
+        if (hasAgents && isAgentObject(parsed.agents[0])) {
+          console.log("✅ Valid GenAgentX agent export detected");
+          return { valid: true, type: 'agent', data: parsed };
+        }
+
+        if (hasTools && isToolObject(parsed.tools[0])) {
+          console.log("✅ Valid GenAgentX tool export detected");
+          return { valid: true, type: 'tool', data: parsed };
         }
       }
 
       // If it's a single agent object, normalize to export shape
       if (isAgentObject(parsed)) {
         console.log("✅ Valid single-agent JSON detected");
-        return { valid: true, data: { version: "1.0", agents: [parsed] } };
+        return { valid: true, type: 'agent', data: { version: "1.0", agentCount: 1, toolCount: 0, agents: [parsed], tools: [] } };
       }
 
-      console.log("❌ Parsed JSON does not match expected agent format");
+      // If it's a single tool object, normalize to export shape
+      if (isToolObject(parsed)) {
+        console.log("✅ Valid single-tool JSON detected");
+        return { valid: true, type: 'tool', data: { version: "1.0", agentCount: 0, toolCount: 1, agents: [], tools: [parsed] } };
+      }
+
+      console.log("❌ Parsed JSON does not match expected agent or tool format");
       return { valid: false };
     };
 
@@ -139,6 +152,29 @@ You can now find it in your agents list. Click **Run** to test it or **Edit** to
     }
   };
 
+  // Handle importing tool from chatbot response
+  const handleImportToolFromChat = (toolData) => {
+    if (onImportTool && toolData.tools && toolData.tools.length > 0) {
+      const tool = toolData.tools[0];
+      // Remove export metadata
+      delete tool.exportedAt;
+      delete tool.createdAt;
+      delete tool.updatedAt;
+      delete tool.originalId;
+
+      onImportTool(tool);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `✅ **Tool "${tool.name}" has been imported!**
+
+You can now find it in your tools list and use it with your agents.`,
+        },
+      ]);
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
@@ -162,6 +198,7 @@ You can now find it in your agents list. Click **Run** to test it or **Edit** to
           role: "assistant",
           content: response,
           hasJSON: detection.valid,
+          jsonType: detection.type,
           jsonData: detection.data,
         },
       ]);
@@ -212,7 +249,16 @@ How can I help you build an agent today?`,
     }
   };
 
-  const getAgentSummary = (agentData) => {
+  const getAgentSummary = (agentData, type) => {
+    if (type === 'tool') {
+      const tool = agentData?.tools?.[0];
+      if (!tool) return null;
+      return {
+        name: tool.name || "Untitled Tool",
+        description: tool.description || "",
+      };
+    }
+    
     const agent = agentData?.agents?.[0];
     if (!agent) return null;
 
@@ -286,7 +332,7 @@ How can I help you build an agent today?`,
                 <div className="message-bubble">
                   {message.role === "assistant" && message.hasJSON && message.jsonData ? (
                     (() => {
-                      const summary = getAgentSummary(message.jsonData);
+                      const summary = getAgentSummary(message.jsonData, message.jsonType);
                       return (
                         <div className="agent-json-summary">
                           <div className="agent-json-name">{summary?.name}</div>
@@ -379,14 +425,20 @@ How can I help you build an agent today?`,
                   )}
                 </div>
 
-                {/* Import Agent Button - Shows if JSON detected */}
+                {/* Import Button - Shows for Agent or Tool */}
                 {message.role === "assistant" &&
                   message.hasJSON &&
                   message.jsonData && (
                     <button
                       className="import-agent-btn"
-                      onClick={() => handleImportFromChat(message.jsonData)}
-                      title="Import this agent"
+                      onClick={() => {
+                        if (message.jsonType === 'tool') {
+                          handleImportToolFromChat(message.jsonData);
+                        } else {
+                          handleImportFromChat(message.jsonData);
+                        }
+                      }}
+                      title={message.jsonType === 'tool' ? 'Import this tool' : 'Import this agent'}
                     >
                       <svg
                         width="14"
@@ -400,7 +452,7 @@ How can I help you build an agent today?`,
                         <polyline points="17 8 12 3 7 8"></polyline>
                         <line x1="12" y1="3" x2="12" y2="15"></line>
                       </svg>
-                      Import Agent
+                      {message.jsonType === 'tool' ? 'Import Tool' : 'Import Agent'}
                     </button>
                   )}
 

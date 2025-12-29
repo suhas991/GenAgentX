@@ -1,5 +1,5 @@
 import React from 'react';
-import { FaRobot, FaBolt, FaHistory, FaCog } from 'react-icons/fa';
+import { FaRobot, FaBolt, FaHistory, FaCog, FaToolbox } from 'react-icons/fa';
 import './Sidebar.css';
 import logo from '/vite.png';
 
@@ -7,6 +7,7 @@ const Sidebar = ({ activeView, onViewChange, onSettingsClick }) => {
   const menuItems = [
     { id: 'agents', label: 'Agents', icon: FaRobot },
     { id: 'workflows', label: 'Workflows', icon: FaBolt },
+    { id: 'tools', label: 'Tools', icon: FaToolbox },
     { id: 'history', label: 'Execution History', icon: FaHistory },
     { id: 'settings', label: 'Settings', icon: FaCog }
   ];

@@ -1,12 +1,14 @@
 import React from 'react';
 import './WorkflowCard.css';
 import { exportWorkflow } from '../services/exportImportService';
+import { getAllTools } from '../services/indexedDB';
 
 const WorkflowCard = ({ workflow, agents, onRun, onEdit, onDelete, isRunning = false }) => {
-  const handleExport = (e) => {
+  const handleExport = async (e) => {
     e.stopPropagation();
     try {
-      exportWorkflow(workflow);
+      const tools = await getAllTools();
+      await exportWorkflow(workflow, agents, tools);
     } catch (error) {
       alert('Failed to export workflow: ' + error.message);
     }

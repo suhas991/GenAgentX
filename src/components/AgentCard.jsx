@@ -3,6 +3,7 @@ import React from 'react';
 import { FaFileDownload } from 'react-icons/fa';
 import { MdDeleteSweep, MdModeEdit } from 'react-icons/md';
 import { exportAgent } from '../services/exportImportService';
+import { getAllTools } from '../services/indexedDB';
 import { getModelName, getModelCategory } from '../constants/models';
 
 const AgentCard = ({ agent, onEdit, onRun, onDelete, isDefault }) => {
@@ -11,10 +12,11 @@ const AgentCard = ({ agent, onEdit, onRun, onDelete, isDefault }) => {
     return `model-badge ${category}`;
   };
 
-  const handleExport = (e) => {
+  const handleExport = async (e) => {
     e.stopPropagation();
     try {
-      exportAgent(agent);
+      const tools = await getAllTools();
+      await exportAgent(agent, tools);
     } catch (error) {
       alert('Failed to export agent: ' + error.message);
     }

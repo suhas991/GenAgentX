@@ -1,6 +1,8 @@
 // src/services/llmService.js
 
 import { searchSimilarDocuments } from './vectorStore';
+import { getToolById } from './indexedDB';
+import { executeAgentWithTools } from './agentExecutor';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -37,14 +39,48 @@ export const executeAgent = async (agent, userInput, customParams) => {
     throw new Error('No internet connection (offline). Please reconnect and try again.');
   }
 
-  const systemPrompt = buildSystemPrompt(agent, customParams);
-  const geminiParams = extractGeminiParameters(customParams);
-  
   const apiKey = getApiKey();
   
   if (!apiKey) {
     throw new Error('API Key not found. Please configure your API key in settings or onboarding.');
   }
+
+  // Check if agent has tools - if so, use the advanced executor with tool calling
+  if (agent.tools && agent.tools.length > 0) {
+    console.log('🔧 Agent has tools - using advanced executor with tool calling support');
+    
+    try {
+      const result = await executeAgentWithTools(agent, userInput, customParams, apiKey);
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Agent execution failed');
+      }
+      
+      // Return the final result with execution metadata
+      let response = result.result;
+      
+      // Optionally append execution summary
+      if (result.toolExecutions && result.toolExecutions.length > 0) {
+        response += `\n\n---\n**Execution Summary:**\n`;
+        response += `- Iterations: ${result.iterations}\n`;
+        response += `- Tools Used: ${result.toolExecutions.length}\n`;
+        result.toolExecutions.forEach((exec, i) => {
+          response += `  ${i + 1}. ${exec.tool} (iteration ${exec.iteration})\n`;
+        });
+      }
+      
+      return response;
+    } catch (error) {
+      console.error('Tool-based execution error:', error);
+      throw new Error(`Failed to execute agent with tools: ${error.message}`);
+    }
+  }
+
+  // No tools - use simple execution
+  console.log('📝 Agent has no tools - using simple execution');
+  
+  const systemPrompt = buildSystemPrompt(agent, customParams);
+  const geminiParams = extractGeminiParameters(customParams);
 
   try {
     // Use the model from agent (default configured in constants)
