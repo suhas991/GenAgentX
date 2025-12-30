@@ -3,7 +3,7 @@
 export const DEFAULT_TOOLS = [
   {
     name: "calculator",
-    description: "Perform mathematical calculations and solve equations. Evaluates mathematical expressions and returns the calculated result. Supports basic arithmetic operations (+, -, *, /), exponents (^), square roots, trigonometric functions (sin, cos, tan), and more complex mathematical operations.",
+    description: "Perform mathematical calculations and solve equations",
     parameters: [
       {
         name: "expression",
@@ -17,7 +17,7 @@ export const DEFAULT_TOOLS = [
   },
   {
     name: "data_analyzer",
-    description: "Analyze datasets and generate statistical insights. Performs statistical analysis on provided datasets including mean, median, mode, standard deviation, correlations, and trend identification. Returns a comprehensive analysis object with all calculated metrics and insights.",
+    description: "Analyze datasets and generate statistical insights",
     parameters: [
       {
         name: "data",
@@ -37,7 +37,7 @@ export const DEFAULT_TOOLS = [
   },
   {
     name: "api_caller",
-    description: "Make HTTP requests to external APIs. Supports all common HTTP methods (GET, POST, PUT, DELETE) and allows custom headers and request bodies. Returns the API response including status code, headers, and response body.",
+    description: "Make HTTP requests to external APIs",
     parameters: [
       {
         name: "url",
@@ -69,7 +69,7 @@ export const DEFAULT_TOOLS = [
   },
   {
     name: "current_datetime",
-    description: "Return the current date/time for timestamping reports and responses. Returns ISO timestamp plus localized date/time for local zone and an optional target timezone (supports common abbreviations like IST/EST/UTC/PST).",
+    description: "Return the current date/time for timestamping reports and responses",
     parameters: [
       {
         name: "timezone",
@@ -83,7 +83,7 @@ export const DEFAULT_TOOLS = [
   },
   {
     name: "uuid_generator",
-    description: "Generate a unique identifier for correlation IDs or request tracking. Returns a random UUID v4 string for tagging outputs or correlating logs.",
+    description: "Generate a unique identifier for correlation IDs or request tracking",
     parameters: [],
     returnType: "string",
     isBuiltIn: true

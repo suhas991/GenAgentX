@@ -30,11 +30,13 @@ const ToolCard = ({ tool, onEdit, onDelete, onTest }) => {
           <FaCode />
         </div>
         <div className="tool-card-info">
-          <h3 className="tool-card-title">{tool.name}</h3>
+          <div className="tool-title-row">
+            <h3 className="tool-card-title">{tool.name}</h3>
+            {isDefault && <span className="tool-badge">Default</span>}
+          </div>
           {tool.description && (
             <p className="tool-card-description">{tool.description}</p>
           )}
-          {isDefault && <span className="tool-badge">Default</span>}
         </div>
       </div>
 

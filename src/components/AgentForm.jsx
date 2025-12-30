@@ -192,9 +192,6 @@ const AgentForm = ({ onSave, initialData = null, onCancel }) => {
                   disabled={isSaving}
                 />
                 <span className="tool-name">{tool.name}</span>
-                {tool.description && (
-                  <span className="tool-description">{tool.description}</span>
-                )}
               </label>
             ))}
           </div>

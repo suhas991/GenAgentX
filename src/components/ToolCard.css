@@ -38,11 +38,19 @@
   flex: 1;
 }
 
+.tool-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
 .tool-card-title {
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--text-color, #333);
-  margin: 0 0 0.5rem 0;
+  margin: 0;
 }
 
 .tool-card-description {
@@ -158,7 +166,6 @@
 
 .tool-badge {
   display: inline-block;
-  margin-top: 6px;
   padding: 4px 10px;
   border-radius: 999px;
   background: linear-gradient(135deg, #10b981, #059669);
@@ -166,6 +173,7 @@
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.3px;
+  flex-shrink: 0;
 }
 
 .tool-card-default {
