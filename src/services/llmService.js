@@ -33,7 +33,7 @@ const getApiKey = () => {
   return null;
 };
 
-export const executeAgent = async (agent, userInput, customParams) => {
+export const executeAgent = async (agent, userInput, customParams, uploadedFiles = []) => {
   // Fast-fail if the browser reports we're offline.
   if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) {
     throw new Error('No internet connection (offline). Please reconnect and try again.');
@@ -107,9 +107,38 @@ export const executeAgent = async (agent, userInput, customParams) => {
     
     const fullPrompt = `${systemPrompt}\n\n---\n\nInput:\n${userInput}${context}`;
     
+    // Build content parts - text + files
+    const contentParts = [];
+    
+    // Add file parts first (recommended for better multimodal understanding)
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      uploadedFiles.forEach(file => {
+        if (file.isInline) {
+          // Use inline data for browser-uploaded files
+          contentParts.push({
+            inline_data: {
+              mime_type: file.mimeType,
+              data: file.inlineData
+            }
+          });
+        } else {
+          // Fallback for file URIs (if using server-side upload)
+          contentParts.push({
+            file_data: {
+              mime_type: file.mimeType,
+              file_uri: file.uri
+            }
+          });
+        }
+      });
+    }
+    
+    // Add text part after files
+    contentParts.push({ text: fullPrompt });
+    
     const requestBody = {
       contents: [{
-        parts: [{ text: fullPrompt }]
+        parts: contentParts
       }],
       generationConfig: {
         temperature: geminiParams.temperature || 0.7,

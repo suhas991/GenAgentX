@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkGfm from "remark-gfm";
+import { MdAttachFile } from "react-icons/md";
 import CopyButton from "./CopyButton";
 import RAGManager from "./RAGManager";
 import { GEMINI_MODELS, getModelName } from "../constants/models";
@@ -11,6 +12,12 @@ import "./RunAgentModal.css";
 import { saveExecutionLog } from "../services/indexedDB";
 import { downloadOutput } from "../services/downloadService";
 import { useAppStore } from "../store/appStore";
+import { 
+  uploadFile, 
+  deleteFile, 
+  isMultimodalFileSupported, 
+  getSupportedMultimodalExtensions 
+} from "../services/fileUploadService";
 
 const RunAgentModal = ({ agent, onRun, onClose }) => {
   const [input, setInput] = useState("");
@@ -24,6 +31,11 @@ const RunAgentModal = ({ agent, onRun, onClose }) => {
   const [ragEnabled, setRagEnabled] = useState(agent.ragEnabled || false);
   const [ragTopK, setRagTopK] = useState(agent.ragTopK || 3);
   const updateAgent = useAppStore((state) => state.updateAgent);
+  
+  // File upload states
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
 
   React.useEffect(() => {
     const defaults = {};
@@ -130,6 +142,56 @@ const RunAgentModal = ({ agent, onRun, onClose }) => {
     await updateAgent(updatedAgentData);
   };
 
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Check if file type is supported
+    if (!isMultimodalFileSupported(file)) {
+      const extensions = getSupportedMultimodalExtensions();
+      alert(`Unsupported file type.\n\nSupported formats:\n${extensions}`);
+      return;
+    }
+
+    setUploadingFile(true);
+    setUploadProgress(`Uploading ${file.name}...`);
+
+    try {
+      const uploadedFile = await uploadFile(file);
+      
+      setUploadedFiles(prev => [...prev, uploadedFile]);
+      setUploadProgress(`✓ Uploaded ${file.name}`);
+      
+      setTimeout(() => {
+        setUploadProgress('');
+        setUploadingFile(false);
+      }, 2000);
+    } catch (error) {
+      console.error('File upload failed:', error);
+      setUploadProgress(`Error: ${error.message}`);
+      setTimeout(() => {
+        setUploadingFile(false);
+        setUploadProgress('');
+      }, 3000);
+    }
+
+    // Reset file input
+    event.target.value = '';
+  };
+
+  const handleRemoveFile = async (fileToRemove) => {
+    try {
+      // Delete from Gemini API
+      await deleteFile(fileToRemove.name);
+      
+      // Remove from local state
+      setUploadedFiles(prev => prev.filter(f => f.name !== fileToRemove.name));
+    } catch (error) {
+      console.error('Failed to delete file:', error);
+      alert(`Failed to delete file: ${error.message}`);
+    }
+  };
+
   const handleRun = async () => {
     setLoading(true);
     setOutput("");
@@ -142,7 +204,7 @@ const RunAgentModal = ({ agent, onRun, onClose }) => {
         ragEnabled,
         ragTopK
       };
-      const result = await onRun(agentWithModel, input, customParamValues);
+      const result = await onRun(agentWithModel, input, customParamValues, uploadedFiles);
       setOutput(result);
 
       // 💡 Log execution with actual output
@@ -345,15 +407,73 @@ const RunAgentModal = ({ agent, onRun, onClose }) => {
             </div>
           )}
 
-          <div className="form-group">
-            <label>Input</label>
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Enter your input for the agent..."
-              rows="4"
-              className="input-textarea"
-            />
+          <div className="form-group input-group-no-asterisk">
+            <label>Input to Agent</label>
+            
+            {/* Uploaded Files Preview */}
+            {uploadedFiles.length > 0 && (
+              <div className="uploaded-files-preview">
+                {uploadedFiles.map((file) => (
+                  <div key={file.name} className="uploaded-file-chip">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      {file.mimeType.startsWith('image/') && (
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      )}
+                      {file.mimeType.startsWith('audio/') && (
+                        <path d="M9 18V5l12-2v13"></path>
+                      )}
+                      {file.mimeType.startsWith('video/') && (
+                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                      )}
+                      {!file.mimeType.startsWith('image/') && !file.mimeType.startsWith('audio/') && !file.mimeType.startsWith('video/') && (
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      )}
+                    </svg>
+                    <span className="file-chip-name">{file.displayName}</span>
+                    <button
+                      onClick={() => handleRemoveFile(file)}
+                      className="file-chip-remove"
+                      title="Remove file"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {/* Upload Progress */}
+            {uploadProgress && (
+              <div className={`upload-progress-inline ${uploadProgress.startsWith('✓') ? 'success' : uploadProgress.startsWith('Error') ? 'error' : ''}`}>
+                {uploadProgress}
+              </div>
+            )}
+            
+            {/* Input Textarea with Upload Button */}
+            <div className="input-with-upload">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Enter your input for the agent..."
+                rows="4"
+                className="input-textarea"
+              />
+              <input
+                type="file"
+                id="file-upload-inline"
+                onChange={handleFileUpload}
+                disabled={uploadingFile}
+                className="file-input-hidden"
+              />
+              <label 
+                htmlFor="file-upload-inline" 
+                className={`file-upload-btn ${uploadingFile ? 'uploading' : ''} ${uploadedFiles.length > 0 ? 'has-files' : ''}`}
+                title="Attach file (Images, Audio, Video, Documents • Max 20MB)"
+              >
+                <MdAttachFile className={`attach-icon ${uploadingFile ? 'spinning' : ''}`} />
+                {uploadedFiles.length > 0 && <span className="file-upload-badge">{uploadedFiles.length}</span>}
+              </label>
+            </div>
           </div>
 
           <button

@@ -5,7 +5,7 @@ export const GEMINI_MODELS = [
   {
     id: "gemini-3-flash-preview",
     name: "Gemini 3 Flash Preview",
-    description: "Latest preview model",
+    description: "Latest Model",
     category: "flash",
   },
   {

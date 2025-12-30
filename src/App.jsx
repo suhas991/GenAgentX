@@ -312,11 +312,11 @@ function App() {
     if (!helperAgent) {
       throw new Error('Helper agent not available. Please refresh the page.');
     }
-    return await executeAgent(helperAgent, message, {});
+    return await executeAgent(helperAgent, message, {}, []);
   };
 
-  const handleRunAgent = async (agent, input, customParams) => {
-    return await executeAgent(agent, input, customParams);
+  const handleRunAgent = async (agent, input, customParams, uploadedFiles = []) => {
+    return await executeAgent(agent, input, customParams, uploadedFiles);
   };
 
   const handleImportAgents = async (importedAgents) => {
